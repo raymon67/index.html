@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Pac-Man PRO</title>
+  <style>
+    body { margin:0; background:black; display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; }
+    canvas { background:black; border:3px solid yellow; }
+    .controls { margin-top:10px; display:grid; grid-template-columns:60px 60px 60px; gap:5px; }
+    button { width:60px; height:60px; font-size:20px; background:#222; color:white; border:1px solid yellow; border-radius:10px; }
+  </style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="controls">
+  <div></div>
+  <button onclick="move('up')">⬆️</button>
+  <div></div>
+  <button onclick="move('left')">⬅️</button>
+  <button onclick="move('down')">⬇️</button>
+  <button onclick="move('right')">➡️</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const tileSize = 20;
+
+const eatSound = new Audio("https://www.soundjay.com/button/sounds/button-3.mp3");
+
+const map = [
+  "111111111111111111111111111111",
+  "100000000000000000000000000001",
+  "101111111011111111011111111101",
+  "101000001000000001000000001001",
+  "101011101111011111011101101101",
+  "100010000000010000000000001001",
+  "111011011111111111111011011011",
+  "100000010000000000001000000001",
+  "101111010111111111101011111101",
+  "100000000010000000100000000001",
+  "101111111010111110101111111101",
+  "100000001000100010000100000001",
+  "101111101111101011111011111101",
+  "100000000000000000000000000001",
+  "111111111111111111111111111111"
+];
+
+canvas.width = map[0].length * tileSize;
+canvas.height = map.length * tileSize;
+
+let pacman = { x:1, y:1, dx:0, dy:0, nextDx:0, nextDy:0 };
+
+let ghosts = [
+  { x:14, y:7, color:"red", type:"chaser" },
+  { x:20, y:10, color:"pink", type:"ambush" }
+];
+
+let lives = 3;
+let score = 0;
+let powerMode = false;
+let powerTimer = 0;
+
+let pellets = [];
+let powerPellets = [
+  {x:1,y:1}, {x:28,y:1}, {x:1,y:13}, {x:28,y:13}
+];
+
+map.forEach((row,y)=>{
+  row.split("").forEach((cell,x)=>{
+    if(cell==="0") pellets.push({x,y,eaten:false});
+  });
+});
+
+function canMove(x,y){ return map[y] && map[y][x] !== "1"; }
+
+function drawMap(){
+  map.forEach((row,y)=>{
+    row.split("").forEach((cell,x)=>{
+      if(cell==="1"){
+        ctx.fillStyle="blue";
+        ctx.fillRect(x*tileSize,y*tileSize,tileSize,tileSize);
+      }
+    });
+  });
+}
+
+function drawPellets(){
+  ctx.fillStyle="white";
+  pellets.forEach(p=>{
+    if(!p.eaten){
+      ctx.beginPath(); ctx.arc(p.x*tileSize+10,p.y*tileSize+10,3,0,Math.PI*2); ctx.fill();
+    }
+  });
+
+  ctx.fillStyle="orange";
+  powerPellets.forEach(p=>{
+    ctx.beginPath(); ctx.arc(p.x*tileSize+10,p.y*tileSize+10,6,0,Math.PI*2); ctx.fill();
+  });
+}
+
+function drawPacman(){
+  let x = pacman.x*tileSize+10;
+  let y = pacman.y*tileSize+10;
+
+  // Animación de boca
+  let angle = Math.abs(Math.sin(Date.now()/100))*0.5;
+
+  let dirAngle = 0;
+  if(pacman.dx === 1) dirAngle = 0;
+  if(pacman.dx === -1) dirAngle = Math.PI;
+  if(pacman.dy === -1) dirAngle = -Math.PI/2;
+  if(pacman.dy === 1) dirAngle = Math.PI/2;
+
+  ctx.fillStyle="yellow";
+  ctx.beginPath();
+  ctx.moveTo(x,y);
+  ctx.arc(x,y,9,dirAngle+angle,dirAngle-angle+2*Math.PI);
+  ctx.closePath();
+  ctx.fill();
+
+  // ojo
+  ctx.fillStyle="black";
+  ctx.beginPath();
+  ctx.arc(x+Math.cos(dirAngle)*3, y+Math.sin(dirAngle)*3-2, 1.5, 0, Math.PI*2);
+  ctx.fill();
+}
+
+function drawGhosts(){
+  ghosts.forEach(g=>{
+    let x = g.x*tileSize+10;
+    let y = g.y*tileSize+10;
+
+    let color = g.color;
+
+    if(powerMode){
+      if(powerTimer < 15 && powerTimer % 4 < 2){
+        color = "white"; // parpadeo
+      } else {
+        color = "blue";
+      }
+    }
+
+    ctx.fillStyle=color;
+    ctx.beginPath();
+    ctx.arc(x,y,8,Math.PI,0);
+    ctx.lineTo(x+8,y+8);
+    ctx.lineTo(x-8,y+8);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle="white";
+    ctx.beginPath(); ctx.arc(x-3,y,2,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+3,y,2,0,Math.PI*2); ctx.fill();
+
+    ctx.fillStyle="black";
+    ctx.beginPath(); ctx.arc(x-3,y,1,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+3,y,1,0,Math.PI*2); ctx.fill();
+  });
+}
+
+function movePacman(){
+  if(canMove(pacman.x + pacman.nextDx, pacman.y + pacman.nextDy)){
+    pacman.dx = pacman.nextDx;
+    pacman.dy = pacman.nextDy;
+  }
+  if(canMove(pacman.x + pacman.dx, pacman.y + pacman.dy)){
+    pacman.x += pacman.dx;
+    pacman.y += pacman.dy;
+  }
+}
+
+function moveGhost(g){
+  let dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  let valid = dirs.filter(d=>canMove(g.x+d[0], g.y+d[1]));
+
+  valid.sort((a,b)=>{
+    let da = Math.hypot(pacman.x-(g.x+a[0]), pacman.y-(g.y+a[1]));
+    let db = Math.hypot(pacman.x-(g.x+b[0]), pacman.y-(g.y+b[1]));
+
+    if(g.type === "ambush") da -= 2; // comportamiento distinto
+
+    return powerMode ? db-da : da-db;
+  });
+
+  if(valid[0]){
+    g.x += valid[0][0];
+    g.y += valid[0][1];
+  }
+}
+
+function resetPositions(){
+  pacman.x = 1; pacman.y = 1;
+}
+
+function update(){
+  movePacman();
+
+  powerPellets = powerPellets.filter(p=>{
+    if(p.x===pacman.x && p.y===pacman.y){
+      powerMode = true;
+      powerTimer = 50;
+      eatSound.play();
+      return false;
+    }
+    return true;
+  });
+
+  ghosts.forEach(g=>{
+    moveGhost(g);
+
+    if(g.x === pacman.x && g.y === pacman.y){
+      if(powerMode){
+        g.x = 14; g.y = 7;
+        score += 10;
+      } else {
+        lives--;
+        if(lives <= 0){
+          alert("Game Over | Puntos: " + score);
+          location.reload();
+        } else {
+          resetPositions();
+        }
+      }
+    }
+  });
+
+  pellets.forEach(p=>{
+    if(!p.eaten && p.x===pacman.x && p.y===pacman.y){
+      p.eaten=true;
+      score++;
+    }
+  });
+
+  if(powerMode){
+    powerTimer--;
+    if(powerTimer <= 0) powerMode = false;
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawMap();
+  drawPellets();
+  drawPacman();
+  drawGhosts();
+
+  ctx.fillStyle="white";
+  ctx.fillText("Puntos: " + score, 10, 15);
+  ctx.fillText("Vidas: " + lives, 120, 15);
+}
+
+function loop(){
+  update();
+  draw();
+  setTimeout(loop,200);
+}
+
+window.addEventListener("keydown", e=>{
+  if(e.key==="ArrowUp"){ pacman.nextDx=0; pacman.nextDy=-1; }
+  if(e.key==="ArrowDown"){ pacman.nextDx=0; pacman.nextDy=1; }
+  if(e.key==="ArrowLeft"){ pacman.nextDx=-1; pacman.nextDy=0; }
+  if(e.key==="ArrowRight"){ pacman.nextDx=1; pacman.nextDy=0; }
+});
+
+function move(dir){
+  if(dir==='up'){ pacman.nextDx=0; pacman.nextDy=-1; }
+  if(dir==='down'){ pacman.nextDx=0; pacman.nextDy=1; }
+  if(dir==='left'){ pacman.nextDx=-1; pacman.nextDy=0; }
+  if(dir==='right'){ pacman.nextDx=1; pacman.nextDy=0; }
+}
+
+loop();
+</script>
+</body>
+</html>
